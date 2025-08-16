@@ -19,7 +19,16 @@ export default function Page() {
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    // Load session ID from localStorage (if exists)
+    const storedId = localStorage.getItem("session_id");
+    if (storedId) {
+      setSessionId(storedId);
+    }
+  }, []);
 
   useEffect(() => {
     scrollToBottom();
@@ -38,13 +47,19 @@ export default function Page() {
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
     setLoading(true);
-
+    //
     try {
-      const response = await fetch("https://csprime.onrender.com/ask", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: input }),
-      });
+      const response = await fetch(
+        "https://cs-prime-backend-4.onrender.com/ask",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(sessionId ? { "X-Session-ID": sessionId } : {}),
+          },
+          body: JSON.stringify({ query: input }),
+        }
+      );
 
       if (!response.ok) {
         const error = await response.json();
@@ -52,6 +67,13 @@ export default function Page() {
       }
 
       const data = await response.json();
+
+      // Store session ID from first request
+      if (!sessionId && data.session_id) {
+        setSessionId(data.session_id);
+        localStorage.setItem("session_id", data.session_id);
+      }
+
       const aiMessage: Message = {
         role: "assistant",
         content: data.answer || "I couldn't find an answer to that question.",
@@ -74,10 +96,28 @@ export default function Page() {
     }
   };
 
+  const resetChat = () => {
+    setSessionId(null);
+    localStorage.removeItem("session_id");
+    setMessages([
+      {
+        role: "system",
+        content:
+          "I'm your Maynooth CS Assistant. Ask me anything about Computer Science modules!",
+      },
+    ]);
+  };
+
   return (
     <div className="flex flex-col items-center h-screen w-full bg-gray-50">
-      <header className="w-full bg-blue-600 text-white p-4 text-center shadow-md">
+      <header className="w-full bg-blue-600 text-white p-4 text-center shadow-md flex justify-between items-center">
         <h1 className="text-xl font-bold">Maynooth CS Module Assistant</h1>
+        <button
+          onClick={resetChat}
+          className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg text-sm"
+        >
+          Reset Chat
+        </button>
       </header>
 
       <div className="flex flex-col p-4 max-w-4xl w-full h-full">
@@ -104,7 +144,7 @@ export default function Page() {
                   </ReactMarkdown>
                 </div>
               </div>
-            ))}{" "}
+            ))}
           {loading && (
             <div className="flex justify-start mb-4">
               <div className="bg-yellow-100 p-3 rounded-lg rounded-bl-none flex items-center gap-2">
