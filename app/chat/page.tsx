@@ -50,7 +50,7 @@ export default function Page() {
     //
     try {
       const response = await fetch(
-        "https://cs-prime-backend-5.onrender.com/ask",
+        "https://cs-prime-backend-5.onrender.coms/ask",
         {
           method: "POST",
           headers: {
