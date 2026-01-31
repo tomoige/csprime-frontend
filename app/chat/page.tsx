@@ -1,13 +1,21 @@
 "use client";
+
 import React, { useState, useRef, useEffect } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import ChatMarkdown from "@/components/ChatMarkdown";
 import LoadingSpinner from "@/components/LoadingSpinner";
+import { GraduationCap, RotateCcw, Send, Sparkles, User } from "lucide-react";
 
 type Message = {
   role: "system" | "user" | "assistant";
   content: string;
 };
+
+const SUGGESTED_PROMPTS = [
+  "What modules should I take in first year?",
+  "Explain recursion in Java",
+  "How does CS210 connect to CS355?",
+  "What is CSPrime and how can it help me?",
+];
 
 export default function Page() {
   const [messages, setMessages] = useState<Message[]>([
@@ -21,9 +29,10 @@ export default function Page() {
   const [loading, setLoading] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
-    // Load session ID from localStorage (if exists)
     const storedId = localStorage.getItem("session_id");
     if (storedId) {
       setSessionId(storedId);
@@ -31,57 +40,45 @@ export default function Page() {
   }, []);
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages, loading]);
-
-  const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
+  }, [messages, loading]);
 
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || loading) return;
 
-    // Add user message
-    const userMessage: Message = { role: "user", content: input };
+    const userMessage: Message = { role: "user", content: input.trim() };
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
     setLoading(true);
-    //
+
     try {
-      const response = await fetch(
-        "https://cs-prime-backend-5.onrender.com/ask",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(sessionId ? { "X-Session-ID": sessionId } : {}),
-          },
-          body: JSON.stringify({ query: input }),
-        }
-      );
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: userMessage.content, sessionId }),
+      });
 
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.detail || response.statusText);
+        throw new Error(error.error || error.detail || response.statusText);
       }
 
       const data = await response.json();
 
-      // Store session ID from first request
       if (!sessionId && data.session_id) {
         setSessionId(data.session_id);
         localStorage.setItem("session_id", data.session_id);
       }
 
-      const aiMessage: Message = {
-        role: "assistant",
-        content: data.answer || "I couldn't find an answer to that question.",
-      };
-
-      setMessages((prev) => [...prev, aiMessage]);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: data.answer || "I couldn't find an answer to that question.",
+        },
+      ]);
     } catch (err: unknown) {
-      console.error("API Error:", err);
       const errorMessage =
         err instanceof Error ? err.message : "Unknown error occurred";
       setMessages((prev) => [
@@ -96,6 +93,11 @@ export default function Page() {
     }
   };
 
+  const handleSuggestedPrompt = (prompt: string) => {
+    setInput(prompt);
+    inputRef.current?.focus();
+  };
+
   const resetChat = () => {
     setSessionId(null);
     localStorage.removeItem("session_id");
@@ -108,78 +110,154 @@ export default function Page() {
     ]);
   };
 
+  const displayMessages = messages.filter((m) => m.role !== "system");
+  const hasMessages = displayMessages.length > 0;
+
   return (
-    <div className="flex flex-col items-center h-screen w-full bg-gray-50">
-      <header className="w-full bg-blue-600 text-white p-4 text-center shadow-md flex justify-between items-center">
-        <h1 className="text-xl font-bold">Maynooth CS Module Assistant</h1>
+    <div className="flex flex-col flex-1 min-h-0 w-full bg-gradient-to-b from-slate-50 to-gray-50">
+      {/* Header - minimal, matches site navbar */}
+      <header className="flex-shrink-0 flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-white/80 backdrop-blur">
+        <div className="flex items-center gap-2">
+          <div className="p-1.5 rounded-lg bg-slate-100">
+            <GraduationCap size={20} className="text-slate-700" />
+          </div>
+          <h1 className="text-lg font-semibold text-slate-800">
+            Maynooth CS Assistant
+          </h1>
+        </div>
         <button
           onClick={resetChat}
-          className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg text-sm"
+          className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-800 transition-colors"
         >
-          Reset Chat
+          <RotateCcw size={16} />
+          New chat
         </button>
       </header>
 
-      <div className="flex flex-col p-4 max-w-4xl w-full h-full">
-        {/* Messages container */}
-        <div className="flex-1 overflow-y-auto mb-4 bg-white rounded-lg shadow-inner p-4">
-          {messages
-            .filter((m) => m.role !== "system")
-            .map((message, i) => (
-              <div
-                key={i}
-                className={`flex mb-4 ${
-                  message.role === "user" ? "justify-end" : "justify-start"
-                }`}
-              >
-                <div
-                  className={`max-w-[80%] p-3 rounded-lg markdown ${
-                    message.role === "user"
-                      ? "bg-blue-100 rounded-br-none"
-                      : "bg-green-100 rounded-bl-none"
-                  }`}
-                >
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {message.content}
-                  </ReactMarkdown>
-                </div>
+      {/* Messages area */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-3xl mx-auto px-4 py-8">
+          {!hasMessages ? (
+            /* Welcome / empty state */
+            <div className="flex flex-col items-center justify-center min-h-[50vh] text-center">
+              <div className="p-4 rounded-2xl bg-white/80 shadow-sm border border-gray-100 mb-6">
+                <Sparkles size={40} className="text-slate-600" />
               </div>
-            ))}
-          {loading && (
-            <div className="flex justify-start mb-4">
-              <div className="bg-yellow-100 p-3 rounded-lg rounded-bl-none flex items-center gap-2">
-                <LoadingSpinner size="sm" />
-                <span>Thinking about your question...</span>
+              <h2 className="text-2xl font-bold text-slate-800 mb-2">
+                How can I help you today?
+              </h2>
+              <p className="text-slate-600 mb-8 max-w-md">
+                Ask about Maynooth CS modules, programming concepts, or how
+                topics connect across your degree.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-xl">
+                {SUGGESTED_PROMPTS.map((prompt) => (
+                  <button
+                    key={prompt}
+                    onClick={() => handleSuggestedPrompt(prompt)}
+                    className="px-4 py-3 text-left rounded-xl border border-gray-200 bg-white hover:border-slate-300 hover:bg-slate-50 text-slate-700 text-sm transition-all shadow-sm"
+                  >
+                    {prompt}
+                  </button>
+                ))}
               </div>
             </div>
+          ) : (
+            /* Message list */
+            <div className="space-y-6">
+              {displayMessages.map((message, i) => (
+                <div
+                  key={i}
+                  className={`flex gap-4 ${
+                    message.role === "user" ? "flex-row" : ""
+                  }`}
+                >
+                  {message.role === "assistant" && (
+                    <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center">
+                      <GraduationCap size={18} className="text-slate-600" />
+                    </div>
+                  )}
+                  <div
+                    className={`flex-1 max-w-[85%] ${
+                      message.role === "user" ? "flex justify-end" : ""
+                    }`}
+                  >
+                    <div
+                      className={`rounded-2xl px-4 py-3 ${
+                        message.role === "user"
+                          ? "bg-slate-800 text-white"
+                          : "bg-white border border-gray-100 shadow-sm text-slate-800"
+                      }`}
+                    >
+                      {message.role === "user" ? (
+                        <p className="text-[15px] leading-relaxed whitespace-pre-wrap">
+                          {message.content}
+                        </p>
+                      ) : (
+                        <ChatMarkdown content={message.content} />
+                      )}
+                    </div>
+                  </div>
+                  {message.role === "user" && (
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-white">
+                      <User size={18} />
+                    </div>
+                  )}
+                </div>
+              ))}
+              {loading && (
+                <div className="flex gap-4">
+                  <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center">
+                    <GraduationCap size={18} className="text-slate-600" />
+                  </div>
+                  <div className="flex-1 bg-white border border-gray-100 rounded-2xl px-4 py-3 shadow-sm">
+                    <div className="flex items-center gap-2 text-slate-500">
+                      <LoadingSpinner size="sm" />
+                      <span className="text-sm">Thinking...</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+              <div ref={messagesEndRef} />
+            </div>
           )}
-          <div ref={messagesEndRef} />
         </div>
+      </div>
 
-        {/* Input form */}
-        <form onSubmit={sendMessage} className="flex gap-2">
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            className="flex-1 p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            placeholder="Ask about CS modules like CS201, CS211..."
-            disabled={loading}
-          />
-          <button
-            type="submit"
-            disabled={loading}
-            className={`bg-blue-600 text-white px-6 py-3 rounded-lg transition ${
-              loading ? "opacity-50 cursor-not-allowed" : "hover:bg-blue-700"
-            }`}
+      {/* Input area - ChatGPT style */}
+      <div className="flex-shrink-0 border-t border-gray-100 bg-white/80 backdrop-blur">
+        <div className="max-w-3xl mx-auto px-4 py-4">
+          <form
+            ref={formRef}
+            onSubmit={sendMessage}
+            className="flex gap-3 items-end p-2 rounded-2xl border border-gray-200 bg-white shadow-sm hover:border-gray-300 focus-within:border-slate-400 focus-within:ring-2 focus-within:ring-slate-100 transition-all"
           >
-            {loading ? "Sending..." : "Ask"}
-          </button>
-        </form>
-
-        <div className="mt-2 text-center text-sm text-gray-500">
-          Ask about modules, professors, or course content at Maynooth
-          University
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  formRef.current?.requestSubmit();
+                }
+              }}
+              placeholder="Ask about modules, programming, or the CS degree..."
+              disabled={loading}
+              rows={1}
+              className="flex-1 min-h-[44px] max-h-32 px-4 py-3 resize-none bg-transparent border-0 focus:outline-none focus:ring-0 text-slate-800 placeholder:text-slate-400 text-[15px] leading-relaxed"
+            />
+            <button
+              type="submit"
+              disabled={loading || !input.trim()}
+              className="flex-shrink-0 p-2.5 rounded-xl bg-slate-800 text-white hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-slate-800 transition-colors"
+            >
+              <Send size={20} />
+            </button>
+          </form>
+          <p className="text-center text-xs text-slate-400 mt-2">
+            Press Enter to send · Shift+Enter for new line
+          </p>
         </div>
       </div>
     </div>

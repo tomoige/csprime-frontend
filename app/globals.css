@@ -47,6 +47,16 @@
   text-wrap: auto;
 }
 
+/* Chat markdown styling */
+.chat-markdown pre {
+  padding: 1rem 1.25rem !important;
+}
+.chat-markdown pre code {
+  background: transparent !important;
+  padding: 0 !important;
+  border: none !important;
+}
+
 :root {
   --radius: 0.625rem;
   --background: oklch(1 0 0);
