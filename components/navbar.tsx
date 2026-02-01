@@ -20,21 +20,21 @@ function Navbar() {
   const pathname = usePathname();
 
   return (
-    <nav className="sticky top-0 z-30 bg-white/80 backdrop-blur border-b border-gray-100 shadow-sm flex justify-between items-center px-6 py-3 w-full">
+    <nav className="sticky top-0 z-30 bg-white/80 backdrop-blur border-b border-gray-100 shadow-sm flex justify-between items-center gap-4 px-4 sm:px-6 py-3 w-full min-w-0">
       <Link
         href="/"
-        className="flex items-center gap-3 hover:opacity-80 transition"
+        className="flex items-center gap-3 hover:opacity-80 transition flex-shrink-0"
       >
         <GraduationCap size={28} className="text-black" />
-        <span className="text-xl font-extrabold pr-[10px] tracking-tight">
+        <span className="text-xl font-extrabold tracking-tight whitespace-nowrap">
           CSPrime
         </span>
       </Link>
-      <div>
-        <ul className="flex gap-2 hidden md:flex items-center">
+      <div className="hidden lg:flex min-w-0 overflow-x-auto">
+        <ul className="flex gap-1 xl:gap-2 items-center flex-shrink-0">
           <Link
             href="/"
-            className={`px-4 py-2 rounded-full font-medium transition-all ${
+            className={`px-3 lg:px-4 py-2 rounded-full font-medium transition-all whitespace-nowrap ${
               pathname == "/"
                 ? "bg-black text-white shadow-sm"
                 : "hover:bg-gray-100 text-gray-900"
@@ -44,7 +44,7 @@ function Navbar() {
           </Link>
           <Link
             href="/modules"
-            className={`px-4 py-2 rounded-full font-medium transition-all ${
+            className={`px-3 lg:px-4 py-2 rounded-full font-medium transition-all whitespace-nowrap ${
               pathname.includes("modules")
                 ? "bg-black text-white shadow-sm"
                 : "hover:bg-gray-100 text-gray-900"
@@ -54,7 +54,7 @@ function Navbar() {
           </Link>
           <Link
             href="/topics"
-            className={`px-4 py-2 rounded-full font-medium transition-all ${
+            className={`px-3 lg:px-4 py-2 rounded-full font-medium transition-all whitespace-nowrap ${
               pathname == "/topics"
                 ? "bg-black text-white shadow-sm"
                 : "hover:bg-gray-100 text-gray-900"
@@ -64,7 +64,7 @@ function Navbar() {
           </Link>
           <Link
             href="/chat"
-            className={`px-4 py-2 rounded-full font-medium transition-all ${
+            className={`px-3 lg:px-4 py-2 rounded-full font-medium transition-all whitespace-nowrap ${
               pathname == "/chat"
                 ? "bg-black text-white shadow-sm"
                 : "hover:bg-gray-100 text-gray-900"
@@ -74,7 +74,7 @@ function Navbar() {
           </Link>
           <li className="relative">
             <button
-              className="px-4 py-2 rounded-full font-medium transition-all hover:bg-gray-100 flex items-center gap-1 text-gray-900"
+              className="px-3 lg:px-4 py-2 rounded-full font-medium transition-all hover:bg-gray-100 flex items-center gap-1 text-gray-900 whitespace-nowrap"
               onClick={() => setMoreOpen((prev) => !prev)}
               onBlur={() => setTimeout(() => setMoreOpen(false), 150)}
               aria-haspopup="true"
@@ -105,13 +105,13 @@ function Navbar() {
           </li>
         </ul>
       </div>
-      <div>
-        <ul className="flex justify-end hidden md:flex lg:gap-4 min-w-[160px]">
+      <div className="flex items-center flex-shrink-0">
+        <ul className="flex gap-2 md:gap-3 items-center hidden lg:flex">
           <SignedOut>
-            <li className="border-gray-400 border-1 py-2 px-4 text-center rounded-lg">
+            <li className="whitespace-nowrap border border-gray-400 py-2 px-3 sm:px-4 text-center rounded-lg text-sm">
               <SignInButton />
             </li>
-            <li className="bg-black text-white py-2 px-4 rounded-lg">
+            <li className="whitespace-nowrap bg-black text-white py-2 px-3 sm:px-4 rounded-lg text-sm">
               <SignUpButton />
             </li>
           </SignedOut>
@@ -121,7 +121,7 @@ function Navbar() {
         </ul>
       </div>
       <button
-        className="text-3xl hover:cursor-pointer flex md:hidden p-2"
+        className="text-3xl hover:cursor-pointer flex lg:hidden p-2 flex-shrink-0"
         onClick={() => setIsOpen((prev) => !prev)}
         aria-label="Toggle mobile menu"
         aria-expanded={isOpen}
@@ -131,7 +131,7 @@ function Navbar() {
       </button>
       <div
         id="mobile-menu"
-        className={`flex md:hidden p-8 ${
+        className={`flex lg:hidden p-8 ${
           !isOpen && "hidden"
         } fixed top-0 left-0 w-full border-b-1 border-gray-200 bg-white z-40`}
       >
