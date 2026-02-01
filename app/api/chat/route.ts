@@ -3,12 +3,13 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import moduleInfo from "@/module_info.json";
 import topicRelations from "@/module_topic_relations.json";
 
-// Initialize Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
-// Build comprehensive context about Maynooth CS
+// Groq: 14,400 requests/day free (vs Gemini ~1,500). Use Groq when key is set.
+const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
+
+// Full context for Gemini (handles large prompts)
 function buildSystemContext(): string {
-  // Format module information
   const moduleContext = Object.entries(moduleInfo)
     .map(([code, info]) => {
       const moduleData = info as {
@@ -31,20 +32,63 @@ function buildSystemContext(): string {
 `;
     })
     .join("\n");
+  return buildSystemPrompt(moduleContext, topicRelations);
+}
 
-  // Format topic relations (what topics in one module lead to other modules)
+// Condensed context for Groq (6K TPM limit - must stay under ~5K tokens)
+function buildSystemContextCondensed(): string {
+  const moduleContext = Object.entries(moduleInfo)
+    .map(([code, info]) => {
+      const moduleData = info as {
+        title: string;
+        credits: string;
+        semester: string;
+        overview: string;
+        year: number;
+      };
+      const shortOverview =
+        moduleData.overview.length > 120
+          ? moduleData.overview.slice(0, 117) + "..."
+          : moduleData.overview;
+      return `${code}: ${moduleData.title} (Y${moduleData.year}, ${moduleData.credits}cr, ${moduleData.semester}) - ${shortOverview}`;
+    })
+    .join("\n");
+
   const topicContext = Object.entries(topicRelations)
     .map(([moduleCode, topics]) => {
       const topicsData = topics as Record<string, string[]>;
-      const topicsList = Object.entries(topicsData)
-        .map(
-          ([topic, relatedModules]) =>
-            `  - ${topic} → ${relatedModules.join(", ")}`
-        )
-        .join("\n");
-      return `${moduleCode}:\n${topicsList}`;
+      return (
+        moduleCode +
+        ": " +
+        Object.entries(topicsData)
+          .map(([t, mods]) => `${t}→${mods.join(",")}`)
+          .join("; ")
+      );
     })
-    .join("\n\n");
+    .join("\n");
+
+  return buildSystemPrompt(moduleContext, topicContext);
+}
+
+function buildSystemPrompt(
+  moduleContext: string,
+  topicContext: string | Record<string, Record<string, string[]>>
+): string {
+  const topics =
+    typeof topicContext === "string"
+      ? topicContext
+      : Object.entries(topicContext)
+          .map(([moduleCode, topics]) => {
+            const topicsData = topics as Record<string, string[]>;
+            const topicsList = Object.entries(topicsData)
+              .map(
+                ([topic, relatedModules]) =>
+                  `  - ${topic} → ${relatedModules.join(", ")}`
+              )
+              .join("\n");
+            return `${moduleCode}:\n${topicsList}`;
+          })
+          .join("\n\n");
 
   return `
 You are a helpful AI assistant for the CSPrime website, a platform designed for Computer Science students at Maynooth University, Ireland.
@@ -75,7 +119,7 @@ ${moduleContext}
 
 ## Topic Connections
 Here's how topics in first-year modules connect to advanced modules:
-${topicContext}
+${topics}
 
 ## Your Role
 1. Answer questions about Maynooth University CS modules - their content, prerequisites, what you'll learn
@@ -101,7 +145,34 @@ const sessions = new Map<
   Array<{ role: string; parts: Array<{ text: string }> }>
 >();
 
+const MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"] as const;
+
+async function sendWithRetry(
+  chat: {
+    sendMessage: (msg: string) => Promise<{ response: { text: () => string } }>;
+  },
+  query: string
+): Promise<string> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const result = await chat.sendMessage(query);
+      return result.response.text();
+    } catch (err) {
+      lastError = err;
+      if (attempt < 2) {
+        const delay = Math.min(1000 * 2 ** attempt, 5000);
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    }
+  }
+  throw lastError;
+}
+
 export async function POST(request: NextRequest) {
+  const groqKey = process.env.GROQ_API_KEY?.trim();
+  const geminiKey = process.env.GEMINI_API_KEY?.trim();
+
   try {
     const { query, sessionId: clientSessionId } = await request.json();
 
@@ -109,9 +180,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Query is required" }, { status: 400 });
     }
 
-    if (!process.env.GEMINI_API_KEY) {
+    if (!groqKey && !geminiKey) {
       return NextResponse.json(
-        { error: "Gemini API key not configured" },
+        { error: "Set GROQ_API_KEY or GEMINI_API_KEY in .env.local" },
         { status: 500 }
       );
     }
@@ -119,27 +190,89 @@ export async function POST(request: NextRequest) {
     // Get or create session
     const sessionId = clientSessionId || crypto.randomUUID();
     let history = sessions.get(sessionId) || [];
+    const systemContext = buildSystemContext();
 
-    // Initialize model with system instruction
-    const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash",
-      systemInstruction: buildSystemContext(),
-    });
+    let answer: string | null = null;
+    let lastError: unknown;
 
-    // Start chat with history
-    const chat = model.startChat({
-      history: history,
-      generationConfig: {
-        maxOutputTokens: 2048,
-        temperature: 0.7,
-      },
-    });
+    // Prefer Groq (14.4K requests/day free vs Gemini ~1.5K)
+    // Use condensed context - Groq has 6K TPM limit on llama-3.1-8b
+    if (groqKey) {
+      try {
+        const groqContext = buildSystemContextCondensed();
+        // Limit history for Groq - llama-3.1 has 6K TPM, condensed context ~4K, leave ~2K for history
+        const groqHistory = history.slice(-6);
+        const messages: Array<{
+          role: "system" | "user" | "assistant";
+          content: string;
+        }> = [
+          { role: "system", content: groqContext },
+          ...groqHistory.map((m) => ({
+            role: (m.role === "model" ? "assistant" : "user") as
+              | "user"
+              | "assistant",
+            content: m.parts[0]?.text ?? "",
+          })),
+          { role: "user", content: query },
+        ];
 
-    // Send message and get response
-    const result = await chat.sendMessage(query);
-    const response = result.response;
-    const answer = response.text();
+        const res = await fetch(GROQ_API_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${groqKey}`,
+          },
+          body: JSON.stringify({
+            // llama-4-scout: 30K TPM, 1K RPD. Fallback: llama-3.1-8b has 6K TPM (condensed context fits)
+            model: "llama-3.1-8b-instant",
+            messages,
+            max_tokens: 8192,
+            temperature: 0.7,
+          }),
+        });
 
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error?.message ?? `Groq ${res.status}`);
+        }
+
+        const data = await res.json();
+        answer = data.choices?.[0]?.message?.content?.trim() ?? "";
+      } catch (err) {
+        lastError = err;
+        console.error("Groq API failed:", err);
+      }
+    }
+
+    // Fallback to Gemini only when Groq key is NOT set (avoid rate-limited Gemini when user chose Groq)
+    if (!answer && geminiKey && !groqKey) {
+      for (const modelId of MODELS) {
+        try {
+          const model = genAI.getGenerativeModel({
+            model: modelId,
+            systemInstruction: systemContext,
+          });
+
+          const chat = model.startChat({
+            history: history,
+            generationConfig: {
+              maxOutputTokens: 8192,
+              temperature: 0.7,
+            },
+          });
+
+          answer = await sendWithRetry(chat, query);
+          break;
+        } catch (err) {
+          lastError = err;
+          continue;
+        }
+      }
+    }
+
+    if (!answer) {
+      throw lastError;
+    }
     // Update history for this session
     history.push(
       { role: "user", parts: [{ text: query }] },
@@ -161,6 +294,10 @@ export async function POST(request: NextRequest) {
 
     const errorMessage =
       error instanceof Error ? error.message : "Unknown error";
+    const errorCause =
+      error instanceof Error && error.cause instanceof Error
+        ? error.cause.message
+        : "";
 
     // Handle specific Gemini API errors
     if (errorMessage.includes("API key")) {
@@ -170,17 +307,40 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (errorMessage.includes("quota") || errorMessage.includes("rate")) {
+    const isCertError =
+      errorMessage.includes("certificate") ||
+      errorMessage.includes("UNABLE_TO_VERIFY") ||
+      errorCause.includes("certificate") ||
+      errorCause.includes("UNABLE_TO_VERIFY");
+
+    if (
+      !isCertError &&
+      (errorMessage.includes("quota") ||
+        errorMessage.includes("rate") ||
+        errorMessage.includes("fetch failed") ||
+        errorMessage.includes("429"))
+    ) {
       return NextResponse.json(
-        { error: "Rate limit exceeded. Please try again later." },
+        {
+          error:
+            "Rate limit or temporary error. Please wait a moment and try again.",
+        },
         { status: 429 }
       );
     }
 
-    return NextResponse.json(
-      { error: "Failed to generate response. Please try again." },
-      { status: 500 }
-    );
+    // When Groq was used, surface the actual error
+    let userMessage = "Failed to generate response. Please try again.";
+    if (groqKey && errorMessage) {
+      if (isCertError) {
+        userMessage =
+          "TLS certificate error (common on Windows with antivirus/VPN). Add NODE_TLS_REJECT_UNAUTHORIZED=0 to .env.local and restart. Dev only.";
+      } else {
+        userMessage = `Groq error: ${errorMessage}. Check your API key at console.groq.com`;
+      }
+    }
+
+    return NextResponse.json({ error: userMessage }, { status: 500 });
   }
 }
 

@@ -210,7 +210,7 @@ export default function Page() {
                   <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center">
                     <GraduationCap size={18} className="text-slate-600" />
                   </div>
-                  <div className="flex-1 bg-white border border-gray-100 rounded-2xl px-4 py-3 shadow-sm">
+                  <div className="w-fit bg-white border border-gray-100 rounded-2xl px-4 py-3 shadow-sm">
                     <div className="flex items-center gap-2 text-slate-500">
                       <LoadingSpinner size="sm" />
                       <span className="text-sm">Thinking...</span>
